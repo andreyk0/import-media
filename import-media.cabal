@@ -30,7 +30,6 @@ executable import-media
                      , filepath >= 1.4.0
                      , optparse-applicative >= 0.11.0.2
                      , shell-conduit >= 4.5.2
-                     , strptime >= 1.0.10
                      , text >= 1.2.0.4
                      , time >= 1.5.0
                      , transformers >= 0.4.3.0
