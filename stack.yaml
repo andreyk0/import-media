@@ -1,0 +1,8 @@
+flags: {}
+packages:
+- '.'
+extra-deps:
+- cond-0.4.1.1
+resolver: nightly-2015-06-26
+
+#resolver: lts-2.15
