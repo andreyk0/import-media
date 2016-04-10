@@ -4,22 +4,23 @@
 
 module Main where
 
-import Control.Conditional
-import Control.Monad hiding(unless,when)
-import Data.List
-import Data.Monoid
-import Data.Time.Clock
-import Data.Time.Format
-import MediaInfo
-import Options.Applicative
-import System.Directory
-import System.FilePath
-import System.IO
-
+import           Control.Conditional
+import           Control.Monad hiding(unless,when)
 import qualified Data.Char as C
 import qualified Data.Conduit.Shell as Sh
-import           Data.Text(Text)
+import           Data.List
+import           Data.Maybe
+import           Data.Monoid
 import qualified Data.Text as T
+import           Data.Text(Text)
+import           Data.Time.Clock
+import           Data.Time.Format
+import           MediaInfo
+import           Options.Applicative
+import           System.Directory
+import           System.Environment
+import           System.FilePath
+import           System.IO
 
 
 data CmdLineArgs =
@@ -31,8 +32,9 @@ data CmdLineArgs =
               } deriving (Show)
 
 
-cmdLineArgs :: Parser CmdLineArgs
-cmdLineArgs =
+cmdLineArgs :: Maybe FilePath -- ^ default media root, if any, from an env var
+            -> Parser CmdLineArgs
+cmdLineArgs maybeMr =
   CmdLineArgs
      <$> switch
          ( long "verbose"
@@ -52,21 +54,20 @@ cmdLineArgs =
      <*> option str
          ( long "media-root"
         <> short 'm'
-        <> help "media root directory" )
+        <> fromMaybe mempty (fmap value maybeMr)
+        <> showDefault
+        <> help "media root directory, defaults to MEDIA_ROOT env var" )
 
      <*> some (argument str (metavar "MEDIA_FILES..."))
 
 
-cmdLineParser :: ParserInfo CmdLineArgs
-cmdLineParser =
-  info (helper <*> cmdLineArgs)
-       ( fullDesc
-      <> header "Imports media files (photo/video) to a media root, organized by date." )
-
-
 main :: IO ()
 main = do
-  args <- execParser cmdLineParser
+  maybeMRoot <- lookupEnv "MEDIA_ROOT"
+
+  args <- execParser $ info (helper <*> (cmdLineArgs maybeMRoot))
+                            ( fullDesc
+                           <> header "Imports media files (photo/video) to a media root, organized by date." )
 
   ifM (doesDirectoryExist (mediaRoot args))
       (return ())
