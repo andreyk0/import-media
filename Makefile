@@ -1,21 +1,28 @@
-PATH:=.cabal-sandbox/bin:$(PATH)
-export PATH
+default: test lint
 
-default: build
+test:
+	stack test import-media
+
+lint:
+	hlint `find src test -type f -name '*.hs'`
 
 build:
-	stack build
+	stack build import-media
+
+build-prof:
+	stack build --profile --ghc-options="-rtsopts" import-media
 
 clean:
 	stack clean
 
-tags:
-	hasktags --ctags --extendedctag  .
+hoogle:
+	stack hoogle --server
 
 .PHONY: \
+	build \
+	build-prof \
 	clean \
 	default \
-	deps \
-	init \
-	tags \
-
+	hoogle \
+	lint \
+	test \

@@ -1,5 +1,6 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-# LANGUAGE ExtendedDefaultRules #-}
+{-# LANGUAGE OverloadedStrings    #-}
 
 
 module MediaInfo(
@@ -9,31 +10,34 @@ module MediaInfo(
 ) where
 
 
-import qualified Data.Conduit.Shell as Sh
-import qualified Data.Conduit.List as CL
-import           Data.Time
+import qualified Data.Conduit.List     as CL
+import           Data.Conduit.Shell    (($|), (.|))
+import qualified Data.Conduit.Shell    as Sh
+import qualified Data.Map              as M
 import           Data.Maybe
-import qualified Data.Map as M
-import           System.Directory
-import           Data.Text (Text)
-import qualified Data.Text as T
+import           Data.Text             (Text)
+import qualified Data.Text             as T
 import           Data.Text.Encoding
+import           Data.Time
+import           System.Directory
 import           Text.XML
-import           Text.XML.Cursor
+import           Text.XML.Cursor       hiding (($|))
 import qualified Text.XML.Stream.Parse as XMLParse
 
 
+default (Text)
+
 
 data MediaInfo =
-  MediaInfo { mediaFilePath:: FilePath
-            , mediaFormat:: Text
-            , mediaDate:: UTCTime
-            , mediaType:: MediaType
+  MediaInfo { mediaFilePath :: FilePath
+            , mediaFormat   :: Text
+            , mediaDate     :: UTCTime
+            , mediaType     :: MediaType
             }
   deriving (Eq, Show)
 
 data MediaType =
-  Image { imageCameraMake :: Maybe Text
+  Image { imageCameraMake  :: Maybe Text
         , imageCameraModel :: Maybe Text
         }
   | Video
@@ -45,20 +49,20 @@ data MediaType =
 parseMediaInfo :: FilePath -> IO MediaInfo
 parseMediaInfo mediaFile = do
 
-  mediaInfoXmlDoc <- Sh.run $ ( (Sh.mediainfo "--output=XML" mediaFile) Sh.$| parseMediaInfoXML )
+  mediaInfoXmlDoc <- Sh.run (Sh.mediainfo "--output=XML" mediaFile $| parseMediaInfoXML)
 
   let rootDocCursor = fromDocument mediaInfoXmlDoc
 
       maybeTrackElement t a = listToMaybe $ rootDocCursor $/
-                                element "File" &/
-                                element "track" >=>
+                                laxElement "media" &/
+                                laxElement "track" >=>
                                 attributeIs "type" t &/ a
 
-      maybeGeneralFormat = maybeTrackElement "General" $ element "Format" &/ content
-      maybeEncodedDate = parseEncodedDate =<< (maybeTrackElement "General" $ element "Encoded_date" &/ content)
+      maybeGeneralFormat = maybeTrackElement "General" $ laxElement "Format" &/ content
+      maybeEncodedDate = parseEncodedDate =<< maybeTrackElement "General" (laxElement "Encoded_date" &/ content)
 
-      maybeVideoFormat = maybeTrackElement "Video" $ element "Format" &/ content -- defined when video
-      maybeImageFormat = maybeTrackElement "Image" $ element "Format" &/ content -- defined when image
+      maybeVideoFormat = maybeTrackElement "Video" $ laxElement "Format" &/ content -- defined when video
+      maybeImageFormat = maybeTrackElement "Image" $ laxElement "Format" &/ content -- defined when image
 
       generalFormat = fromMaybe "UNKNOWN" $ listToMaybe $ catMaybes [maybeGeneralFormat, maybeVideoFormat, maybeImageFormat] -- prefer general format, more aligned with file extensions
 
@@ -66,7 +70,7 @@ parseMediaInfo mediaFile = do
 
   let unknownMediaInfo = MediaInfo mediaFile generalFormat fileModUTCTime Unknown
 
-  if (isJust maybeVideoFormat)
+  if isJust maybeVideoFormat
   then
     let vidEncDate = fromMaybe fileModUTCTime maybeEncodedDate
     in return $ unknownMediaInfo { mediaType = Video, mediaDate = vidEncDate }
@@ -75,7 +79,7 @@ parseMediaInfo mediaFile = do
    case maybeImageFormat
      of Just "JPEG" -> parseJHead unknownMediaInfo -- mediainfo doesn't parse all JPG headers, use jhead for that
         Just _      -> return $ unknownMediaInfo { mediaType = Image Nothing Nothing }
-        Nothing     -> return $ unknownMediaInfo
+        Nothing     -> return unknownMediaInfo
 
 
 -- <Encoded_date>UTC 2015-04-11 14:26:03</Encoded_date> -- from GoPro
@@ -85,7 +89,7 @@ parseEncodedDate t = parseTimeM True defaultTimeLocale "%Z %Y-%m-%d %H:%M:%S" (T
 
 -- | Specialized conduit to parse XML output into a Document
 parseMediaInfoXML :: Sh.Segment Document
-parseMediaInfoXML = Sh.conduit (XMLParse.parseBytesPos def Sh.$= fromEvents)
+parseMediaInfoXML = Sh.conduit (XMLParse.parseBytesPos def .| fromEvents)
 
 
 -- | Parse jhead output, fill in more mediainfo fields
@@ -93,7 +97,7 @@ parseJHead :: MediaInfo
            -> IO MediaInfo
 parseJHead unknownMediaInfo = do
   jheadLines <- getJHeadOutputLines (mediaFilePath unknownMediaInfo)
-  let kvPairs = M.fromList $ map (\(k,v) -> (T.strip k, T.strip (T.drop 1 v))) $ map (T.break (== ':')) jheadLines
+  let kvPairs = M.fromList $ (\(k,v) -> (T.strip k, T.strip (T.drop 1 v))) . T.break (== ':') <$> jheadLines
   return $ unknownMediaInfo { mediaDate = fromMaybe (mediaDate unknownMediaInfo) (parseJHeadDate =<< M.lookup "Date/Time" kvPairs)
                             , mediaType = Image (M.lookup "Camera make" kvPairs) (M.lookup "Camera model" kvPairs)
                             }
@@ -102,8 +106,8 @@ parseJHead unknownMediaInfo = do
 -- | Get lines of
 getJHeadOutputLines :: FilePath -> IO [Text]
 getJHeadOutputLines fp = do
-  let cLines = Sh.conduit (CL.map (T.lines . decodeUtf8) Sh.$= CL.consume)
-  tls <- Sh.run $ (Sh.jhead "-se" fp Sh.$| cLines)
+  let cLines = Sh.conduit (CL.map (T.lines . decodeUtf8) .| CL.consume)
+  tls <- Sh.run (Sh.jhead "-se" fp $| cLines)
   return $ concat tls
 
 -- Date/Time    : 2015:03:31 13:04:01 -- from jhead
